@@ -150,9 +150,9 @@ jobs:
         mkdir -p "$PKG_DIR/bin"
 
         if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-          cp "target/${{ matrix.target }}/release/ov.exe" "$PKG_DIR/bin/ov.exe"
+          cp "$CARGO_TARGET_DIR/${{ matrix.target }}/release/ov.exe" "$PKG_DIR/bin/ov.exe"
         else
-          cp "target/${{ matrix.target }}/release/ov" "$PKG_DIR/bin/ov"
+          cp "$CARGO_TARGET_DIR/${{ matrix.target }}/release/ov" "$PKG_DIR/bin/ov"
           chmod +x "$PKG_DIR/bin/ov"
         fi
 

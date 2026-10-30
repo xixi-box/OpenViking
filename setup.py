@@ -215,6 +215,8 @@ class OpenVikingBuildExt(build_ext):
             print("Building ov CLI from source...")
             try:
                 env = _sanitize_native_build_env(os.environ.copy())
+                if env.get("OV_CLI_CARGO_TARGET_DIR"):
+                    env["CARGO_TARGET_DIR"] = env["OV_CLI_CARGO_TARGET_DIR"]
                 env["OPENVIKING_VERSION"] = resolve_openviking_version(
                     env=env, project_root=SETUP_DIR
                 )
@@ -306,6 +308,8 @@ class OpenVikingBuildExt(build_ext):
             try:
                 print("Building ragfs-python (Rust RAGFS binding) via maturin...")
                 env = _sanitize_native_build_env(os.environ.copy())
+                if env.get("OV_RAGFS_CARGO_TARGET_DIR"):
+                    env["CARGO_TARGET_DIR"] = env["OV_RAGFS_CARGO_TARGET_DIR"]
                 build_args = [
                     sys.executable,
                     "-m",

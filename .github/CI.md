@@ -43,9 +43,14 @@ Its check name stays `cuvs-tests / Lite Test (ubuntu-24.04, 3.11)`, matching the
 previous PR workflow. The caller job ID, reusable job name, Python version and
 test list are preserved, so ordinary required status checks need no migration.
 
-Cargo intermediates and ccache outputs are keyed by runner OS/architecture,
-target and compiler fingerprint. Cargo also includes the lockfile. Both primary
-keys end with the commit SHA so later main builds can save updated compiler
+CLI and RAGFS Cargo intermediates use separate `target/cli` and `target/ragfs`
+directories and component keys. CLI fingerprints include Rust, target, flags and
+the native toolchain (MSVC on Windows); installing/upgrading the engine's MinGW or
+CMake does not invalidate the Windows CLI cache. RAGFS fingerprints also retain
+its native compiler/CMake identities. The C++ ccache fingerprint includes the
+C/C++ compilers, CMake and native flags/options, independently of Rust.
+All caches include runner OS/architecture; Cargo also includes the target and
+lockfile. Primary keys end with the commit SHA so later main builds can save updated compiler
 output into new immutable entries. Prefix restores select the newest compatible
 cache, preferring the same Cargo lockfile before other entries for that toolchain.
 Only non-PR runs on the official repository's `main`
@@ -53,6 +58,15 @@ branch save these caches; PR, fork and tag runs restore only. Ccache is capped a
 256 MiB per entry and Cargo incremental output is disabled. Older main entries
 remain subject to GitHub's cache quota and eviction. Source changes still rebuild
 correctly through Cargo/ccache input validation.
+
+`windows-cache-warmup.yml` runs on relevant official `main` pushes, or can be
+manually dispatched on official `main`. It calls the same Windows/Python 3.10
+wheel workflow used by PRs, compiling CLI, RAGFS and C++ and running the existing
+wheel smoke test before successful post-job cache saves. It uploads build
+artifacts without publishing. The first main run fills the new cache namespaces;
+PRs cannot populate them before merge. Warmup runs are not cancelled by newer
+pushes, allowing cold builds to finish and save their caches.
+
 Wheel building compiles each native component once.
 Studio is built once per distribution workflow and downloaded by each wheel job.
 Bootstrap/version/repair/test commands use `uv run --no-sync`; test environments
@@ -71,10 +85,12 @@ python3 -m pip install pytest PyYAML
 python3 -m pytest --noconftest -q -o addopts='' \
   tests/misc/test_abi3_packaging_config.py \
   tests/misc/test_release_tag_selection.py \
-  tests/misc/test_linux_runner.py
+  tests/misc/test_linux_runner.py \
+  tests/misc/test_compiler_cache.py
 actionlint .github/workflows/pr.yml .github/workflows/api_test.yml \
   .github/workflows/_build.yml .github/workflows/_test_lite.yml \
-  .github/workflows/_test_full.yml .github/workflows/rust-cli.yml
+  .github/workflows/_test_full.yml .github/workflows/rust-cli.yml \
+  .github/workflows/windows-cache-warmup.yml
 ```
 
 Compare wall time, runner queue time, compiler cache hits and native build counts

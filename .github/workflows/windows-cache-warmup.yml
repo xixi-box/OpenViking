@@ -1,0 +1,39 @@
+name: Warm Windows compiler caches
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'src/**'
+      - 'third_party/**'
+      - '.gitmodules'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'setup.py'
+      - 'MANIFEST.in'
+      - 'scripts/build_support/**'
+      - 'web-studio/**'
+      - '.github/actions/compiler-cache/**'
+      - '.github/workflows/_build.yml'
+      - '.github/workflows/windows-cache-warmup.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-cache-warmup-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  warm:
+    if: github.repository == 'volcengine/OpenViking' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/_build.yml
+    with:
+      os_json: '["windows-latest"]'
+      python_json: '["3.10"]'
+      build_sdist: false
+      build_wheels: true

@@ -4,10 +4,17 @@ inputs:
   target:
     description: Explicit Cargo target or host
     default: host
+  component:
+    description: Cargo component to cache (cli or ragfs)
+    default: cli
+  cpp:
+    description: Also restore/save the C++ compiler cache
+    default: 'false'
 runs:
   using: composite
   steps:
     - name: Install ccache
+      if: inputs.cpp == 'true'
       shell: bash
       run: |
         if ! command -v ccache >/dev/null; then
@@ -27,23 +34,31 @@ runs:
       shell: bash
       env:
         CACHE_TARGET: ${{ inputs.target }}
+        CACHE_COMPONENT: ${{ inputs.component }}
+        CACHE_CPP: ${{ inputs.cpp }}
+        CACHE_ACTION_PATH: ${{ github.action_path }}
       run: |
-        fingerprint=$(
-          { rustc -vV;
-            for compiler in "${CC:-gcc}" "${CXX:-g++}"; do
-              if command -v "$compiler" >/dev/null; then "$compiler" --version; fi
-            done
-            cmake --version; printf '%s\n' "$CACHE_TARGET" "${RUSTFLAGS:-}" "${CFLAGS:-}" "${CXXFLAGS:-}";
-          } | { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi; } | cut -d' ' -f1
-        )
-        echo "hash=$fingerprint" >> "$GITHUB_OUTPUT"
-        echo "CCACHE_DIR=$GITHUB_WORKSPACE/.cache/ccache" >> "$GITHUB_ENV"
-        echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
-        echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
-        echo "CCACHE_MAXSIZE=256M" >> "$GITHUB_ENV"
+        case "$CACHE_COMPONENT" in
+          cli) override=OV_CLI_CARGO_TARGET_DIR ;;
+          ragfs) override=OV_RAGFS_CARGO_TARGET_DIR ;;
+          *) echo "::error::Unknown Cargo cache component: $CACHE_COMPONENT"; exit 1 ;;
+        esac
+        if command -v python3 >/dev/null; then python_cmd=python3; else python_cmd=python; fi
+        "$python_cmd" "$CACHE_ACTION_PATH/fingerprint.py"
+        target_dir="$GITHUB_WORKSPACE/target/$CACHE_COMPONENT"
+        # Cargo and Python subprocesses on Windows need a native absolute path.
+        if [ "$RUNNER_OS" = Windows ]; then target_dir=$(cygpath -m "$target_dir"); fi
+        echo "CARGO_TARGET_DIR=$target_dir" >> "$GITHUB_ENV"
+        echo "$override=$target_dir" >> "$GITHUB_ENV"
         echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
-        echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
-        echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+        if [ "$CACHE_CPP" = true ]; then
+          echo "CCACHE_DIR=$GITHUB_WORKSPACE/.cache/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=256M" >> "$GITHUB_ENV"
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+        fi
     # Only official main runs populate shared caches. PRs, forks and tag builds
     # restore without registering a post-job save. Commit suffixes allow each
     # main revision to save new compiler output into immutable cache entries.
@@ -53,35 +68,33 @@ runs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git/db
-          target
-        key: cargo-v3-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
+          target/${{ inputs.component }}
+        key: cargo-v4-${{ inputs.component }}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ steps.toolchain.outputs.cargo }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
         restore-keys: |
-          cargo-v3-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Cargo.lock') }}-
-          cargo-v3-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ steps.toolchain.outputs.hash }}-
+          cargo-v4-${{ inputs.component }}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ steps.toolchain.outputs.cargo }}-${{ hashFiles('Cargo.lock') }}-
+          cargo-v4-${{ inputs.component }}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ steps.toolchain.outputs.cargo }}-
     - uses: actions/cache@v5
       if: github.repository == 'volcengine/OpenViking' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
       with:
         path: |
           ~/.cargo/registry
           ~/.cargo/git/db
-          target
-        key: cargo-v3-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
+          target/${{ inputs.component }}
+        key: cargo-v4-${{ inputs.component }}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ steps.toolchain.outputs.cargo }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
         restore-keys: |
-          cargo-v3-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Cargo.lock') }}-
-          cargo-v3-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ steps.toolchain.outputs.hash }}-
+          cargo-v4-${{ inputs.component }}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ steps.toolchain.outputs.cargo }}-${{ hashFiles('Cargo.lock') }}-
+          cargo-v4-${{ inputs.component }}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ steps.toolchain.outputs.cargo }}-
     - uses: actions/cache/restore@v5
-      if: github.repository != 'volcengine/OpenViking' || github.ref != 'refs/heads/main' || github.event_name == 'pull_request'
+      if: inputs.cpp == 'true' && (github.repository != 'volcengine/OpenViking' || github.ref != 'refs/heads/main' || github.event_name == 'pull_request')
       with:
         path: .cache/ccache
-        key: ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-${{ github.sha }}
+        key: ccache-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cpp }}-${{ github.sha }}
         restore-keys: |
-          ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-
-          ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}
+          ccache-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cpp }}-
     - uses: actions/cache@v5
-      if: github.repository == 'volcengine/OpenViking' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+      if: inputs.cpp == 'true' && github.repository == 'volcengine/OpenViking' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
       with:
         path: .cache/ccache
-        key: ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-${{ github.sha }}
+        key: ccache-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cpp }}-${{ github.sha }}
         restore-keys: |
-          ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-
-          ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}
+          ccache-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cpp }}-

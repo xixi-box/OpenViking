@@ -28,6 +28,11 @@ runs:
         toolchain: stable
     - uses: ./.github/actions/compiler-cache
       if: inputs.artifact == ''
+    - uses: ./.github/actions/compiler-cache
+      if: inputs.artifact == ''
+      with:
+        component: ragfs
+        cpp: 'true'
     - name: Build native runtime
       if: inputs.artifact == ''
       shell: bash
